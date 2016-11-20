@@ -44,24 +44,35 @@ func NewClient() *Client {
 // should be async
 func (c *Client) PushConfig(s []string) {
 	log.Println("[DEBUG] Within PushConfig")
-	for _, p := range c.Peers {
+	for _, a := range s {
+		log.Printf("[DEBUG] actor %v", a)
+		p, err := NewPeer(a, "7777")
+		if err != nil {
+			log.Printf("[WARN] peer contact failed: %v", err)
+			continue
+		}
 		log.Printf("[DEBUG] Peer: %+v", p)
 		var i int
 		if err := p.c.Call("Client.ReceivePeers", s, &i); err != nil {
 			log.Fatal("Client.ReceivePeers [%d] error:", i, err)
 		}
 	}
-
 }
 
 func (c *Client) ReceivePeers(s []string, i *int) error {
-	for _, x := range s {
-		p, err := NewPeer(a, "7777", peerInput.Actors...)
+	var peers []*Peer
+	for _, a := range s {
+		log.Printf("[DEBUG] actor %v", a)
+		p, err := NewPeer(a, "7777")
 		if err != nil {
-			log.Println("ReceivePeers: ", err)
+			log.Printf("[WARN] peer contact failed: %v", err)
+			continue
 		}
-
+		peers = append(peers, p)
 	}
+
+	log.Printf("[INFO] %v new peers added", len(peers))
+	c.Peers = peers
 
 	return nil
 }
@@ -98,22 +109,7 @@ func (c *Client) ConfigHandler(w http.ResponseWriter, r *http.Request) {
 
 	// if we care, we can return the results of this data
 	// to the user, maybe with a param?
-	go func() {
-		var peers []*Peer
-		for _, a := range peerInput.Actors {
-			log.Printf("[DEBUG] actor %v", a)
-			p, err := NewPeer(a, "7777")
-			if err != nil {
-				tr.LazyPrintf("peer contact failed: %v", err)
-				log.Printf("peer contact failed: %v", err)
-				continue
-			}
-			peers = append(peers, p)
-		}
-
-		c.Peers = peers
-		c.PushConfig()
-	}()
+	go c.PushConfig(peerInput.Actors)
 
 	// return 200
 }
