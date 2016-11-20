@@ -9,6 +9,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	_ "net/http/pprof"
 	"net/rpc"
 	"regexp"
 	"sync"
@@ -17,6 +18,7 @@ import (
 	"golang.org/x/net/trace"
 
 	"github.com/dacamp/challenge/counter"
+	"github.com/dacamp/challenge/peer"
 )
 
 var (
@@ -29,119 +31,11 @@ func init() {
 	}
 }
 
-type peerList struct {
-	Actors []string `json:"actors"`
-}
-
-type Client struct {
-	Peers []*Peer
-}
-
-func NewClient() *Client {
-	return new(Client)
-}
-
-// should be async
-func (c *Client) PushConfig(s []string) {
-	log.Println("[DEBUG] Within PushConfig")
-	for _, a := range s {
-		log.Printf("[DEBUG] actor %v", a)
-		p, err := NewPeer(a, "7777")
-		if err != nil {
-			log.Printf("[WARN] peer contact failed: %v", err)
-			continue
-		}
-		log.Printf("[DEBUG] Peer: %+v", p)
-		var i int
-		if err := p.c.Call("Client.ReceivePeers", s, &i); err != nil {
-			log.Fatal("Client.ReceivePeers [%d] error:", i, err)
-		}
-	}
-}
-
-func (c *Client) ReceivePeers(s []string, i *int) error {
-	var peers []*Peer
-	for _, a := range s {
-		log.Printf("[DEBUG] actor %v", a)
-		p, err := NewPeer(a, "7777")
-		if err != nil {
-			log.Printf("[WARN] peer contact failed: %v", err)
-			continue
-		}
-		peers = append(peers, p)
-	}
-
-	log.Printf("[INFO] %v new peers added", len(peers))
-	c.Peers = peers
-
-	return nil
-}
-
-func (c *Client) HasPeers() bool {
-	return len(c.Peers) > 0
-}
-
-func (c *Client) ConfigHandler(w http.ResponseWriter, r *http.Request) {
-	tr := trace.New("peer.ConfigHandler %q", r.URL.Path)
-	defer tr.Finish()
-
-	if r.Method != "POST" {
-		tr.LazyPrintf("method not allowed %v %v", r.Method, r.URL.Path)
-		tr.SetError()
-		http.Error(w, `{"error": "Method not allowed"}`, http.StatusMethodNotAllowed)
-		return
-	}
-	if err := r.ParseForm(); err != nil {
-		http.Error(w, `{"error": "`+err.Error()+`"}`, http.StatusInternalServerError)
-		return
-	}
-
-	defer r.Body.Close()
-	body, err := ioutil.ReadAll(r.Body)
-
-	var peerInput peerList
-	if err = json.Unmarshal(body, &peerInput); err != nil {
-		tr.LazyPrintf("json.Unmarshal failed: %v", err)
-		tr.SetError()
-		http.Error(w, `{"error": "`+err.Error()+`"}`, http.StatusInternalServerError)
-		return
-	}
-
-	// if we care, we can return the results of this data
-	// to the user, maybe with a param?
-	go c.PushConfig(peerInput.Actors)
-
-	// return 200
-}
-
-type Peer struct {
-	c      *rpc.Client
-	Target string `json:"peer,omitempty"`
-	Port   string `json:"port,omitempty"`
-
-	// reserved for future use
-	health int
-}
-
-func NewPeer(host, port string) (*Peer, error) {
-	client, err := rpc.DialHTTP("tcp", host+":"+port)
-	if err != nil {
-		log.Printf("[ERROR] rpc.DialHTTP failed: %v", err)
-		return nil, err
-	}
-
-	return &Peer{
-		c:      client,
-		Target: host,
-		Port:   port,
-	}, nil
-}
-
 func main() {
 	gCounter := counter.NewGCounter()
 	rpc.Register(gCounter)
 
-	pClient := NewClient()
+	pClient := peer.NewClient()
 	rpc.Register(pClient)
 
 	rpc.HandleHTTP()
@@ -196,11 +90,11 @@ func main() {
 				for _, p := range pClient.Peers {
 					wg.Add(1)
 
-					go func(p *Peer) {
+					go func(p *peer.Peer) {
 						defer wg.Done()
 						tr.LazyPrintf("contacting remote peer %q", p.Target)
 
-						if err := p.c.Call("GCounter.SetUint64", &counter.Args{
+						if err := p.Call("GCounter.SetUint64", &counter.Args{
 							Key:   path[1],
 							Value: val,
 						}, &val); err != nil {
@@ -255,11 +149,11 @@ func main() {
 			for _, p := range pClient.Peers {
 				wg.Add(1)
 
-				go func(p *Peer) {
+				go func(p *peer.Peer) {
 					defer wg.Done()
 
 					var v uint64
-					if err = p.c.Call("GCounter.SetUint64", args, &v); err != nil {
+					if err = p.Call("GCounter.SetUint64", args, &v); err != nil {
 						log.Fatal("counter.LoadUint64 error:", err)
 					}
 				}(p)

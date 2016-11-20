@@ -1,10 +1,11 @@
 #!/bin/bash
 
-if [[ "$@" -gt 0 ]]; then
-curl -i \
-     -H "Accept: application/json" \
-     -H "Content-Type:application/json" \
-     -X POST --data '{ "actors": ["172.17.0.3", "172.17.0.2", "172.17.0.4"] }' http://localhost:1234/config
+if [[ ! -z "$1" ]]; then
+    echo "UPDATING CONFIG"
+    curl -i \
+	 -H "Accept: application/json" \
+	 -H "Content-Type:application/json" \
+	 -X POST --data '{ "actors": ["172.17.0.3", "172.17.0.2", "172.17.0.4"] }' http://localhost:1234/config
 fi
 
 for i in {1..10}; do
