@@ -25,12 +25,6 @@ var (
 	routeRegexp = regexp.MustCompile("^/counter/([a-zA-Z0-9]+)/?((?:consistent_)?value)?$")
 )
 
-func init() {
-	trace.AuthRequest = func(req *http.Request) (any, sensitive bool) {
-		return true, false
-	}
-}
-
 func main() {
 	gCounter := counter.NewGCounter()
 	rpc.Register(gCounter)
@@ -45,7 +39,6 @@ func main() {
 	}
 
 	http.HandleFunc("/config", pClient.ConfigHandler)
-
 	http.HandleFunc("/counter/", func(w http.ResponseWriter, r *http.Request) {
 		tr := trace.New("main.counterHandler", r.URL.Path)
 		defer tr.Finish()
@@ -165,19 +158,12 @@ func main() {
 	http.Serve(l, nil)
 }
 
-// GetLocalIP returns the non loopback local IP of the host
-func GetLocalIP() string {
-	addrs, err := net.InterfaceAddrs()
-	if err != nil {
-		return ""
+func init() {
+	// This is due to ACLs limitations within the trace package
+	// requiring that authorized requests come from localhost
+	// only.  I'm sure there's some docker magic to properly mask
+	// requests, but this was an easier hack.
+	trace.AuthRequest = func(req *http.Request) (any, sensitive bool) {
+		return true, false
 	}
-	for _, address := range addrs {
-		// check the address type and if it is not a loopback the display it
-		if ipnet, ok := address.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
-			if ipnet.IP.To4() != nil {
-				return ipnet.IP.String()
-			}
-		}
-	}
-	return ""
 }
