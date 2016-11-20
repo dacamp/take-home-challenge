@@ -23,6 +23,12 @@ var (
 	routeRegexp = regexp.MustCompile("^/counter/([a-zA-Z0-9]+)/?((?:consistent_)?value)?$")
 )
 
+func init() {
+	trace.AuthRequest = func(req *http.Request) (any, sensitive bool) {
+		return true, false
+	}
+}
+
 type peerList struct {
 	Actors []string `json:"actors"`
 }
