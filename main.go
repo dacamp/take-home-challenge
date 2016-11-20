@@ -11,7 +11,6 @@ import (
 	"net/rpc"
 	"regexp"
 	"sync"
-	"sync/atomic"
 
 	"github.com/dacamp/challenge/counter"
 )
@@ -28,7 +27,7 @@ func main() {
 	gCounter := counter.NewGCounter()
 	rpc.Register(gCounter)
 	rpc.HandleHTTP()
-	l, e := net.Listen("tcp", ":1234")
+	l, e := net.Listen("tcp", ":7777")
 	if e != nil {
 		log.Fatal("listen error:", e)
 	}
@@ -69,6 +68,12 @@ func main() {
 			case "value":
 				gCounter.LoadUint64(path[1], &val)
 			case "consistent_value":
+				if peers.Actors == nil {
+					gCounter.LoadUint64(path[1], &val)
+					break
+				}
+
+				gCounter.LoadUint64(path[1], &val)
 				var wg sync.WaitGroup
 				for _, a := range peers.Actors {
 					wg.Add(1)
@@ -76,21 +81,24 @@ func main() {
 					go func(a string) {
 						defer wg.Done()
 
-						client, err := rpc.DialHTTP("tcp", a+":1234")
+						client, err := rpc.DialHTTP("tcp", a+":7777")
 						if err != nil {
 							log.Fatal("dialing:", err)
 						}
 
-						var v uint64
-						if err = client.Call("GCounter.LoadUint64", path[1], &v); err != nil {
+						if err = client.Call("GCounter.SetUint64", &counter.Args{
+							Key:   path[1],
+							Value: val,
+						}, &val); err != nil {
 							log.Fatal("counter.LoadUint64 error:", err)
 						}
-						atomic.AddUint64(&val, v)
 					}(a)
 				}
 				wg.Wait()
-
-				gCounter.Set(path[1], val)
+				gCounter.SetUint64(&counter.Args{
+					Key:   path[1],
+					Value: val,
+				}, &val)
 			default:
 				http.Error(w, `{"method": "`+r.Method+`", "error": "No route found for '`+r.URL.Path+`'"}`, http.StatusBadRequest)
 				return
@@ -105,7 +113,31 @@ func main() {
 				http.Error(w, `{"method": "`+r.Method+`", "error": "`+err.Error()+`"}`, http.StatusInternalServerError)
 				return
 			}
-			gCounter.AddUint64(path[1], c)
+			newVal := gCounter.AddUint64(path[1], c)
+
+			args := &counter.Args{
+				Key:   path[1],
+				Value: newVal,
+			}
+			var wg sync.WaitGroup
+			for _, a := range peers.Actors {
+				wg.Add(1)
+
+				go func(a string) {
+					defer wg.Done()
+
+					client, err := rpc.DialHTTP("tcp", a+":7777")
+					if err != nil {
+						log.Fatal("dialing:", err)
+					}
+
+					var v uint64
+					if err = client.Call("GCounter.SetUint64", args, &v); err != nil {
+						log.Fatal("counter.LoadUint64 error:", err)
+					}
+				}(a)
+			}
+			wg.Wait()
 		}
 	})
 

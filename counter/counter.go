@@ -28,6 +28,23 @@ func (g *GCounter) AddUint64(key string, delta uint64) uint64 {
 	return g.Counter[key]
 }
 
+type Args struct {
+	Key   string
+	Value uint64
+}
+
+func (g *GCounter) SetUint64(a *Args, val *uint64) error {
+	g.Lock()
+	defer g.Unlock()
+
+	if v, ok := g.Counter[a.Key]; !ok || v < a.Value {
+		g.Counter[a.Key] = a.Value
+	}
+
+	*val = g.Counter[a.Key]
+	return nil
+}
+
 func (g *GCounter) Set(key string, val uint64) {
 	g.Lock()
 	defer g.Unlock()
@@ -37,13 +54,13 @@ func (g *GCounter) Set(key string, val uint64) {
 	}
 }
 
-func (g *GCounter) Converge(a *GCounter, _ *int64) error {
+func (g *GCounter) Merge(a *GCounter, val *int64) error {
 	g.RLock()
 	defer g.RUnlock()
 
-	for i, val := range a.Counter {
-		if v, ok := g.Counter[i]; !ok || v < val {
-			g.Counter[i] = val
+	for i, rv := range a.Counter {
+		if lv, ok := g.Counter[i]; !ok || lv < rv {
+			g.Counter[i] = rv
 		}
 	}
 	return nil
