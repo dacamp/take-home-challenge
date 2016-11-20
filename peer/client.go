@@ -108,7 +108,7 @@ func (c *Client) ConfigHandler(w http.ResponseWriter, r *http.Request) {
 	// return 200
 }
 
-// should be async
+// TODO use async rpc.Client.Go
 func (c *Client) pushConfig(s []string) {
 	log.Println("[DEBUG] Within PushConfig")
 	for _, a := range s {
@@ -121,7 +121,7 @@ func (c *Client) pushConfig(s []string) {
 		log.Printf("[DEBUG] Peer: %+v", p)
 		var i int
 		if err := p.Call("Client.ReceivePeers", s, &i); err != nil {
-			log.Fatal("Client.ReceivePeers [%d] error:", i, err)
+			log.Printf("[ERROR] Client.ReceivePeers [%d] error: %v", i, err)
 		}
 	}
 }

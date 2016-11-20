@@ -1,24 +1,38 @@
-IMAGE_LOG_FILE = /tmp/challenge.docker
-IMAGE_ID ?= $(shell tail -1 $(IMAGE_LOG_FILE)  | cut -d " " -f 3)
+include go-build/docker.mk
 
-stop:
-	docker stop `docker ps -a -q`
+VENDOR = $(CURDIR)/vendor
+GO := go
+GOFMT := gofmt
+GOVET := $(GO) vet
+GOLINT := golint
+GLIDE := glide
 
-remove: stop
-	docker rm `docker ps -a -q`
 
-docker:
-	docker build . | tee $(IMAGE_LOG_FILE)
+# all .go files that don't exist in hidden directories
+ALL_SRC := $(shell find . -name "*.go" | grep -v -e vendor -e go-build \
+	-e ".*/\..*" \
+	-e ".*/_.*" \
+        -e ".*/mocks.*")
 
-validate-docker-build:
-ifndef IMAGE_ID
-    $(error unable to determine docker image $(IMAGE_LOG_FILE) does not exist)
-endif
+$(VENDOR):
+	$(GLIDE) install
 
-deploy: docker validate-docker-build
-	docker run -d -p 127.0.0.1:1234:7777 $(IMAGE_ID);
-	docker run -d -p 127.0.0.1:1235:7777 $(IMAGE_ID);
-	docker run -d -p 127.0.0.1:1236:7777 $(IMAGE_ID);
+vendor: $(VENDOR)
+
+build: vendor
+	$(GO) build -o $(CURDIR)/bin/challenge-executable
+
+test: vendor
+	$(GO) test -i -race
+
+fmt:
+	@$(GOFMT) -s -w $(ALL_SRC)
+
+lint:
+	@$(GOLINT) ./... 2>&1 | grep -v vendor # this is lame, it still vets vendors packages
+
+vet:
+	@$(GOVET) ./... 2>&1  | grep -v vendor # this is lame, it still vets vendors packages
 
 show-requests:
 	open "http://localhost:1234/debug/requests?fam=main.counterHandler&b=0"
