@@ -3,7 +3,7 @@ FROM       ubuntu:16.04
 EXPOSE 7777
 RUN apt-get update
 RUN apt-get -y upgrade
-RUN apt-get -y install wget
+RUN apt-get -y install wget curl emacs
 
 RUN wget https://storage.googleapis.com/golang/go1.7.linux-amd64.tar.gz
 RUN tar -xvf go1.7.linux-amd64.tar.gz

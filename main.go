@@ -27,18 +27,26 @@ type peerList struct {
 	Actors []string `json:"actors"`
 }
 
-func main() {
-	gCounter := counter.NewGCounter()
-	rpc.Register(gCounter)
-	rpc.HandleHTTP()
-	l, e := net.Listen("tcp", ":7777")
-	if e != nil {
-		log.Fatal("listen error:", e)
-	}
+type Client struct {
+	Peers []Peer
+}
 
-	var peers peerList
-	http.HandleFunc("/config", func(w http.ResponseWriter, r *http.Request) {
+func NewClient() *Client {
+	return new(Client)
+}
+
+func (c *Client) HasPeers() bool {
+	return len(c.Peers) > 0
+}
+
+func (c *Client) ConfigHandler() func(http.ResponseWriter, *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		tr := trace.New("main.counterConfig", r.URL.Path)
+		defer tr.Finish()
+
 		if r.Method != "POST" {
+			tr.LazyPrintf("method not allowed %v %v", r.Method, r.URL.Path)
+			tr.SetError()
 			http.Error(w, `{"error": "Method not allowed"}`, http.StatusMethodNotAllowed)
 			return
 		}
@@ -49,12 +57,76 @@ func main() {
 
 		defer r.Body.Close()
 		body, err := ioutil.ReadAll(r.Body)
-		if err = json.Unmarshal(body, &peers); err != nil {
+
+		var peerInput peerList
+		if err = json.Unmarshal(body, &peerInput); err != nil {
+			tr.LazyPrintf("json.Unmarshal failed: %v", err)
+			tr.SetError()
 			http.Error(w, `{"error": "`+err.Error()+`"}`, http.StatusInternalServerError)
 			return
 		}
+
+		// if we care, we can return the results of this data
+		// to the user, maybe with a param?
+		go func() {
+			var peers []Peer
+			for _, a := range peerInput.Actors {
+				p, err := NewPeer(a, "7777", peerInput.Actors...)
+				if err != nil {
+					tr.LazyPrintf("peer contact failed: %v", err)
+					continue
+				}
+				peers = append(peers, *p)
+			}
+
+			c.Peers = peers
+		}()
+
 		// return 200
-	})
+	}
+}
+
+type Peer struct {
+	c      *rpc.Client
+	Target string `json:"peer,omitempty"`
+	Port   string `json:"port,omitempty"`
+
+	// reserved for future use
+	health int
+}
+
+func NewPeer(t, p string, candidates ...string) (*Peer, error) {
+	client, err := rpc.DialHTTP("tcp", t+":"+p)
+	if err != nil {
+		log.Printf("[ERROR] rpc.DialHTTP failed: %v", err)
+		return nil, err
+	}
+
+	// go p.pushConfig(candidates)
+	return &Peer{
+		c:      client,
+		Target: t,
+		Port:   p,
+	}, nil
+}
+
+// func (p *Peer) pushConfig(c []string) {
+// 	if err = client.Call("Peer.ReceivePeers", c, nil); err != nil {
+// 		log.Fatal("Peer.ReceivePeers error:", err)
+// 	}
+// }
+
+func main() {
+	gCounter := counter.NewGCounter()
+	rpc.Register(gCounter)
+	rpc.HandleHTTP()
+	l, e := net.Listen("tcp", ":7777")
+	if e != nil {
+		log.Fatal("listen error:", e)
+	}
+
+	pClient := NewClient()
+	http.HandleFunc("/config", pClient.ConfigHandler())
 
 	http.HandleFunc("/counter/", func(w http.ResponseWriter, r *http.Request) {
 		tr := trace.New("main.counterHandler", r.URL.Path)
@@ -81,7 +153,7 @@ func main() {
 			case "value":
 				gCounter.LoadUint64(path[1], &val)
 			case "consistent_value":
-				if peers.Actors == nil {
+				if !pClient.HasPeers() {
 					gCounter.LoadUint64(path[1], &val)
 					break
 				}
@@ -97,22 +169,14 @@ func main() {
 				defer cancel()
 
 				var wg sync.WaitGroup
-				for _, a := range peers.Actors {
+				for _, p := range pClient.Peers {
 					wg.Add(1)
 
-					go func(a string) {
+					go func(p *Peer) {
 						defer wg.Done()
-						tr.LazyPrintf("contacting remote peer %q", a)
+						tr.LazyPrintf("contacting remote peer %q", p.Target)
 
-						client, err := rpc.DialHTTP("tcp", a+":7777")
-						if err != nil {
-							tr.LazyPrintf("rpc.DialHTTP failed: %v", err)
-							tr.SetError()
-
-							log.Printf("[ERROR] rpc.DialHTTP failed: %v", err)
-						}
-
-						if err = client.Call("GCounter.SetUint64", &counter.Args{
+						if err := p.c.Call("GCounter.SetUint64", &counter.Args{
 							Key:   path[1],
 							Value: val,
 						}, &val); err != nil {
@@ -121,7 +185,7 @@ func main() {
 
 							log.Printf("[ERROR] counter.Setuint64 rpc failed: %v:", err)
 						}
-					}(a)
+					}(&p)
 				}
 				wg.Wait()
 
@@ -164,22 +228,17 @@ func main() {
 				Value: newVal,
 			}
 			var wg sync.WaitGroup
-			for _, a := range peers.Actors {
+			for _, p := range pClient.Peers {
 				wg.Add(1)
 
-				go func(a string) {
+				go func(p *Peer) {
 					defer wg.Done()
 
-					client, err := rpc.DialHTTP("tcp", a+":7777")
-					if err != nil {
-						log.Fatal("dialing:", err)
-					}
-
 					var v uint64
-					if err = client.Call("GCounter.SetUint64", args, &v); err != nil {
+					if err = p.c.Call("GCounter.SetUint64", args, &v); err != nil {
 						log.Fatal("counter.LoadUint64 error:", err)
 					}
-				}(a)
+				}(&p)
 			}
 			wg.Wait()
 		}
