@@ -10,40 +10,57 @@ import (
 	"golang.org/x/net/trace"
 )
 
-type peerList struct {
-	Actors []string `json:"actors"`
-}
-
+// Client handles remote peer coordination
 type Client struct {
 	sync.RWMutex
 
 	Peers []*Peer
 }
 
+// peerList is a type made specifically for this challenge to accept
+// an incoming JSON POST
+type peerList struct {
+	Actors []string `json:"actors"`
+}
+
+// NewClient returns a new Client object
 func NewClient() *Client {
 	return new(Client)
 }
 
+// ReceivePeers is an RPC function takes an incoming slice of peers
 func (c *Client) ReceivePeers(s []string, i *int) error {
 	var peers []*Peer
 	for _, a := range s {
+		tr := trace.New("peer.ReceivePeers", a)
+		defer tr.Finish()
+
 		log.Printf("[DEBUG] actor %v", a)
 		p, err := NewPeer(a, "7777")
 		if err != nil {
-			log.Printf("[WARN] peer contact failed: %v", err)
+			tr.LazyPrintf("peer %q contact failed: %v", a, err)
+			log.Printf("[WARN] peer %q contact failed: %v", a, err)
 			continue
 		}
+		tr.LazyPrintf("peer %v added", p.Target)
 		peers = append(peers, p)
 	}
 
-	log.Printf("[INFO] %v new peers added", len(peers))
 	c.Lock()
 	c.Peers = peers
 	c.Unlock()
+	log.Printf("[INFO] added %v new peers", len(peers))
+	if i != nil {
+		*i = len(peers)
+	}
 
 	return nil
 }
 
+// HasPeers is a helper function testing for the presents of available
+// remote peers
+//
+// TODO: validate the health of those peers
 func (c *Client) HasPeers() bool {
 	c.RLock()
 	defer c.RUnlock()
@@ -51,8 +68,15 @@ func (c *Client) HasPeers() bool {
 	return len(c.Peers) > 0
 }
 
+// ConfigHandler is an http.HandlerFunc that accepts a JSON blob of
+// actors, validates the request and on success, broadcasts the
+// configs to peers.
+//
+// NOTE: this is last write wins, so conflicting configs sent to
+// different nodes may produce unexpected results.
+// TODO: fix this^
 func (c *Client) ConfigHandler(w http.ResponseWriter, r *http.Request) {
-	tr := trace.New("peer.ConfigHandler %q", r.URL.Path)
+	tr := trace.New("peer.ConfigHandler", r.URL.Path)
 	defer tr.Finish()
 
 	if r.Method != "POST" {
