@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -11,6 +12,9 @@ import (
 	"net/rpc"
 	"regexp"
 	"sync"
+	"time"
+
+	"golang.org/x/net/trace"
 
 	"github.com/dacamp/challenge/counter"
 )
@@ -53,9 +57,18 @@ func main() {
 	})
 
 	http.HandleFunc("/counter/", func(w http.ResponseWriter, r *http.Request) {
+		tr := trace.New("main.counterHandler", r.URL.Path)
+		defer tr.Finish()
+		// tr.LazyPrintf("some event %q happened", str)
+		// if err := somethingImportant(); err != nil {
+		// 	tr.LazyPrintf("somethingImportant failed: %v", err)
+		// 	tr.SetError()
+		// }
+
 		path := routeRegexp.FindStringSubmatch(r.URL.Path)
 		if path == nil {
 			http.Error(w, `{"method": "`+r.Method+`", "error": "No route found for '`+r.URL.Path+`'"}`, http.StatusBadRequest)
+			tr.LazyPrintf("no route found %v %q", r.Method, r.URL.Path)
 			return
 		}
 
@@ -74,31 +87,62 @@ func main() {
 				}
 
 				gCounter.LoadUint64(path[1], &val)
+
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+
+				// Even though ctx should have expired already, it is good
+				// practice to call its cancelation function in any case.
+				// Failure to do so may keep the context and its parent alive
+				// longer than necessary.
+				defer cancel()
+
 				var wg sync.WaitGroup
 				for _, a := range peers.Actors {
 					wg.Add(1)
 
 					go func(a string) {
 						defer wg.Done()
+						tr.LazyPrintf("contacting remote peer %q", a)
 
 						client, err := rpc.DialHTTP("tcp", a+":7777")
 						if err != nil {
-							log.Fatal("dialing:", err)
+							tr.LazyPrintf("rpc.DialHTTP failed: %v", err)
+							tr.SetError()
+
+							log.Printf("[ERROR] rpc.DialHTTP failed: %v", err)
 						}
 
 						if err = client.Call("GCounter.SetUint64", &counter.Args{
 							Key:   path[1],
 							Value: val,
 						}, &val); err != nil {
-							log.Fatal("counter.LoadUint64 error:", err)
+							tr.LazyPrintf("counter.Setuint64 rpc failed: %v", err)
+							tr.SetError()
+
+							log.Printf("[ERROR] counter.Setuint64 rpc failed: %v:", err)
 						}
 					}(a)
 				}
 				wg.Wait()
-				gCounter.SetUint64(&counter.Args{
-					Key:   path[1],
-					Value: val,
-				}, &val)
+
+				d := make(chan struct{})
+				go func() {
+					defer close(d)
+					wg.Wait()
+				}()
+
+				select {
+				case <-ctx.Done():
+					log.Println("[WARN] timeout before operation completed")
+					http.Error(w, `{"method": "`+r.Method+`", "error": "`+ctx.Err().Error()+`"}`, http.StatusInternalServerError)
+					return
+				case <-d:
+					// fall through
+				}
+				// gCounter.SetUint64(&counter.Args{
+				//	Key:   path[1],
+				//	Value: val,
+				//}, &val)
 			default:
 				http.Error(w, `{"method": "`+r.Method+`", "error": "No route found for '`+r.URL.Path+`'"}`, http.StatusBadRequest)
 				return
