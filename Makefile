@@ -5,6 +5,9 @@ GLIDE := glide
 GOFMT := gofmt
 GOLINT := golint
 GOVET := $(GO) vet
+
+TMP = $(CURDIR)/.tmp
+COVERFILE = $(TMP)/coverage.out
 VENDOR = $(CURDIR)/vendor
 
 
@@ -15,19 +18,28 @@ ALL_PKGS = $(shell $(GO) list $(sort $(dir $(ALL_SRC))))
 
 BUILD_GC_FLAGS ?= -gcflags "-trimpath=$(GOPATH)/src"
 BUILD_FLAGS ?=
+
 TEST_FLAGS += $(BUILD_GC_FLAGS)
+
+$(TMP):
+	@mkdir .tmp
+
+$(COVERFILE): $(TMP) test
 
 $(VENDOR):
 	$(GLIDE) install
 
-vendor: $(VENDOR)
-
 bins: vendor
 	@$(GO) build -o $(CURDIR)/bin/challenge-executable -i $(BUILD_FLAGS) $(BUILD_GC_FLAGS)
 
-test: vendor
-	@$(foreach pkg, $(ALL_PKGS), \
-		$(GO) test -v -race $(pkg) || true;)
+clean:
+	@rm -rf .tmp vendor bin/challenge-executable
+
+cover:
+	@rm -f $(COVERFILE);
+	@echo "mode: count" > $(COVERFILE);
+	@grep -h -v "mode: " $(TMP)/*.cover >> $(COVERFILE);
+	@$(GO) tool cover -html=$(COVERFILE)
 
 fmt:
 	@$(GOFMT) -s -w $(ALL_SRC)
@@ -35,6 +47,12 @@ fmt:
 lint:
 	$(foreach pkg, $(ALL_PKGS), \
 		$(GOLINT) $(pkg) || true;)
+
+test: $(TMP) vendor
+	@$(foreach pkg, $(ALL_PKGS), \
+		 $(GO) test -v -race $(TEST_FLAGS) -coverprofile $(TMP)/$(lastword $(subst /, ,$(pkg))).cover $(pkg) || true;)
+
+vendor: $(VENDOR)
 
 vet:
 	$(foreach pkg, $(ALL_PKGS), \

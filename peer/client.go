@@ -91,8 +91,9 @@ func (c *Client) HasPeers() bool {
 }
 
 // TODO use async rpc.Client.Go
-func (c *Client) pushConfig(s []string) {
+func (c *Client) pushConfig(s []string) int {
 	log.Println("[DEBUG] Within PushConfig")
+	var i int
 	for _, a := range s {
 		log.Printf("[DEBUG] actor %v", a)
 		p, err := NewPeer(a, "7777")
@@ -101,11 +102,11 @@ func (c *Client) pushConfig(s []string) {
 			continue
 		}
 		log.Printf("[DEBUG] Peer: %+v", p)
-		var i int
 		if err := p.Call("Client.ReceivePeers", s, &i); err != nil {
 			log.Printf("[ERROR] Client.ReceivePeers [%d] error: %v", i, err)
 		}
 	}
+	return i
 }
 
 // getLocalIP returns the non loopback local IP of the host

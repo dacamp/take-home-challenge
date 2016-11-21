@@ -15,9 +15,10 @@ import (
 
 func main() {
 	client := peer.NewClient()
-	rpc.Register(client)
 
+	rpc.Register(client)
 	rpc.HandleHTTP()
+
 	l, e := net.Listen("tcp", ":7777")
 	if e != nil {
 		log.Fatal("listen error:", e)
