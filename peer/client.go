@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/net/context"
 	"golang.org/x/net/trace"
 )
 
@@ -92,20 +93,64 @@ func (c *Client) HasPeers() bool {
 
 // TODO use async rpc.Client.Go
 func (c *Client) pushConfig(s []string) int {
+	ctx, cancel := context.WithTimeout(context.Background(), DefaultTimeout*time.Second)
+
+	// Even though ctx should have expired already, it is good
+	// practice to call its cancelation function in any case.
+	// Failure to do so may keep the context and its parent alive
+	// longer than necessary.
+	defer cancel()
+
 	log.Println("[DEBUG] Within PushConfig")
-	var i int
+
+	intCh := make(chan int)
+
+	var wg sync.WaitGroup
 	for _, a := range s {
+		wg.Add(1)
+
 		log.Printf("[DEBUG] actor %v", a)
-		p, err := NewPeer(a, "7777")
-		if err != nil {
-			log.Printf("[WARN] peer contact failed: %v", err)
-			continue
-		}
-		log.Printf("[DEBUG] Peer: %+v", p)
-		if err := p.Call("Client.ReceivePeers", s, &i); err != nil {
-			log.Printf("[ERROR] Client.ReceivePeers [%d] error: %v", i, err)
-		}
+		go func(a string) {
+			defer wg.Done()
+
+			p, err := NewPeer(a, "7777")
+			if err != nil {
+				log.Printf("[WARN] peer contact failed: %v", err)
+				return
+			}
+			log.Printf("[DEBUG] Peer: %+v", p)
+
+			var i int
+			if err := p.Call("Client.ReceivePeers", s, &i); err != nil {
+				log.Printf("[ERROR] Client.ReceivePeers [%d] error: %v", i, err)
+			}
+			intCh <- i
+		}(a)
 	}
+
+	d := make(chan struct{})
+	go func() {
+		defer close(d)
+		defer close(intCh)
+		wg.Wait()
+	}()
+
+	var i int
+	go func() {
+		for x := range intCh {
+			if i < x {
+				i = x
+			}
+		}
+	}()
+
+	select {
+	case <-ctx.Done():
+		log.Println("[WARN] timeout before operation completed")
+	case <-d:
+		// fall through
+	}
+
 	return i
 }
 

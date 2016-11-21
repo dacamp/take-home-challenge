@@ -43,7 +43,8 @@ linux: vendor
 	@GOOS=linux GOARCH=amd64 $(GO) build -o $(CURDIR)/bin/challenge-executable -i $(BUILD_FLAGS) $(BUILD_GC_FLAGS)
 
 package: linux
-	@tar -zcvf $(TARFILE) --exclude=$(TARFILE) --exclude=.git --exclude=.tmp ../challenge && \
+	cd $(CURDIR)/.. &&  \
+	tar -zcvf challenge/$(TARFILE) --exclude=$(TARFILE) --exclude=.git --exclude=.tmp challenge && \
 	echo "TARBALL CREATED: $(CURDIR)/$(TARFILE)"
 
 vendor: $(VENDOR)

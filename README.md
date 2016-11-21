@@ -1,6 +1,10 @@
 Challenge
 =========
 
+See `RETROSPECTIVE.md` for post project thoughts.
+
+See `CONTRIBUTING.md` for dev/deploy process
+
 # Problem Space
 A highly available distributed database of grow-only counters [[1]](https://gist.github.com/sargun/f7300f622181c543349a59e02c166391).
 
