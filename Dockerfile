@@ -17,5 +17,5 @@ RUN mkdir -p $GOPATH/src/github.com/dacamp/challenge/bin
 ADD . /usr/local/challenge/src/github.com/dacamp/challenge
 
 WORKDIR $GOPATH/src/github.com/dacamp/challenge
-RUN go build -o bin/counter
-CMD bin/counter
+RUN go build -o bin/challenge-executable
+CMD bin/challenge-executable
