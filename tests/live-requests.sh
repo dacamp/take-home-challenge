@@ -1,4 +1,12 @@
 #!/bin/bash
+# NOTE: not even close to 'web scale'
+#
+# Super jank integration hack tests:
+#  * container on :1234 can receive configs
+#  * POST requests to containers on ports :1235 & :1236 can receive
+#    counter values
+#  * those values get replicated out to all nodes, include :1234
+
 
 if [[ ! -z "$1" ]]; then
     echo "UPDATING CONFIG"

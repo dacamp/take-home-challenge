@@ -15,10 +15,13 @@ stop:
 remove: stop
 	@if [[ "$(IMAGES)" ]]; then  docker rm $(IMAGES); fi
 
-docker-build:
+docker-build: package
 	docker build . | tee $(IMAGE_LOG_FILE)
 
 validate-docker-build:
 ifndef IMAGE_ID
     $(error unable to determine docker image $(IMAGE_LOG_FILE) does not exist)
 endif
+
+open-debug-requests:
+	open "http://localhost:1234/debug/requests" "http://localhost:1235/debug/requests" "http://localhost:1236/debug/requests"
