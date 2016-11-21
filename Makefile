@@ -48,6 +48,9 @@ lint:
 	$(foreach pkg, $(ALL_PKGS), \
 		$(GOLINT) $(pkg) || true;)
 
+linux: vendor
+	@GOOS=linux GOARCH=amd64 $(GO) build -o $(CURDIR)/bin/challenge-executable -i $(BUILD_FLAGS) $(BUILD_GC_FLAGS)
+
 test: $(TMP) vendor
 	@$(foreach pkg, $(ALL_PKGS), \
 		 $(GO) test -v -race $(TEST_FLAGS) -coverprofile $(TMP)/$(lastword $(subst /, ,$(pkg))).cover $(pkg) || true;)
