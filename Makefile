@@ -19,7 +19,7 @@ $(VENDOR):
 
 vendor: $(VENDOR)
 
-build: vendor
+bins: vendor
 	$(GO) build -o $(CURDIR)/bin/challenge-executable
 
 test: vendor

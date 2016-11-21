@@ -13,10 +13,9 @@ ENV GOROOT=/usr/local/go
 ENV PATH=$GOROOT/bin:$PATH
 ENV GOPATH=/usr/local/challenge
 
-RUN mkdir -p $GOPATH/src/github.com/dacamp/challenge
+RUN mkdir -p $GOPATH/src/github.com/dacamp/challenge/bin
 ADD . /usr/local/challenge/src/github.com/dacamp/challenge
 
 WORKDIR $GOPATH/src/github.com/dacamp/challenge
-RUN mkdir bin
 RUN go build -o bin/counter
 CMD bin/counter
