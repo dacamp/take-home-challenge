@@ -4,6 +4,8 @@ package peer
 import (
 	"log"
 	"net/rpc"
+
+	"golang.org/x/net/trace"
 )
 
 // Peer reflects all the remote peers, which may include itself
@@ -31,4 +33,22 @@ func NewPeer(host, port string) (*Peer, error) {
 		Port:   port,
 		health: 1,
 	}, nil
+}
+
+// Call is a wrapper around rpc.Call, allowing for peer health to be
+// evaluated
+func (p *Peer) Call(serviceMethod string, args interface{}, reply interface{}) error {
+	tr := trace.New("peer.Call", p.Target)
+	defer tr.Finish()
+
+	if err := p.Client.Call(serviceMethod, args, reply); err != nil {
+		tr.LazyPrintf("%v rpc failed: %v", serviceMethod, err)
+		tr.SetError()
+
+		log.Printf("[ERROR] %v rpc failed: %v:", serviceMethod, err)
+
+		return err
+	}
+	tr.LazyPrintf("%v rpc success", serviceMethod)
+	return nil
 }

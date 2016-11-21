@@ -1,20 +1,28 @@
 package peer
 
 import (
-	"encoding/json"
-	"io/ioutil"
 	"log"
+	"net"
 	"net/http"
+	"regexp"
 	"sync"
+	"time"
 
 	"golang.org/x/net/trace"
+)
+
+var (
+	// DefaultTimeout is the allowed timeout while making RPC calls to peers
+	DefaultTimeout = time.Duration(5)
+	routeRegexp    = regexp.MustCompile("^/counter/([a-zA-Z0-9]+)/?((?:consistent_)?value)?$")
 )
 
 // Client handles remote peer coordination
 type Client struct {
 	sync.RWMutex
 
-	Peers []*Peer
+	localIP string
+	Peers   []*Peer
 }
 
 // peerList is a type made specifically for this challenge to accept
@@ -25,13 +33,20 @@ type peerList struct {
 
 // NewClient returns a new Client object
 func NewClient() *Client {
-	return new(Client)
+	return &Client{
+		localIP: getLocalIP(),
+	}
 }
 
 // ReceivePeers is an RPC function takes an incoming slice of peers
 func (c *Client) ReceivePeers(s []string, i *int) error {
 	var peers []*Peer
+
 	for _, a := range s {
+		if a == c.localIP {
+			continue
+		}
+
 		tr := trace.New("peer.ReceivePeers", a)
 		defer tr.Finish()
 
@@ -43,6 +58,13 @@ func (c *Client) ReceivePeers(s []string, i *int) error {
 			continue
 		}
 		tr.LazyPrintf("peer %v added", p.Target)
+		peers = append(peers, p)
+	}
+
+	p, err := NewPeer(c.localIP, "7777")
+	if err != nil {
+		log.Printf("[WARN] local RPC endpoint %q contact failed: %v", c.localIP, err)
+	} else {
 		peers = append(peers, p)
 	}
 
@@ -68,46 +90,6 @@ func (c *Client) HasPeers() bool {
 	return len(c.Peers) > 0
 }
 
-// ConfigHandler is an http.HandlerFunc that accepts a JSON blob of
-// actors, validates the request and on success, broadcasts the
-// configs to peers.
-//
-// NOTE: this is last write wins, so conflicting configs sent to
-// different nodes may produce unexpected results.
-// TODO: fix this^
-func (c *Client) ConfigHandler(w http.ResponseWriter, r *http.Request) {
-	tr := trace.New("peer.ConfigHandler", r.URL.Path)
-	defer tr.Finish()
-
-	if r.Method != "POST" {
-		tr.LazyPrintf("method not allowed %v %v", r.Method, r.URL.Path)
-		tr.SetError()
-		http.Error(w, `{"error": "Method not allowed"}`, http.StatusMethodNotAllowed)
-		return
-	}
-	if err := r.ParseForm(); err != nil {
-		http.Error(w, `{"error": "`+err.Error()+`"}`, http.StatusInternalServerError)
-		return
-	}
-
-	defer r.Body.Close()
-	body, err := ioutil.ReadAll(r.Body)
-
-	var peerInput peerList
-	if err = json.Unmarshal(body, &peerInput); err != nil {
-		tr.LazyPrintf("json.Unmarshal failed: %v", err)
-		tr.SetError()
-		http.Error(w, `{"error": "`+err.Error()+`"}`, http.StatusInternalServerError)
-		return
-	}
-
-	// if we care, we can return the results of this data
-	// to the user, maybe with a param?
-	go c.pushConfig(peerInput.Actors)
-
-	// return 200
-}
-
 // TODO use async rpc.Client.Go
 func (c *Client) pushConfig(s []string) {
 	log.Println("[DEBUG] Within PushConfig")
@@ -123,5 +105,32 @@ func (c *Client) pushConfig(s []string) {
 		if err := p.Call("Client.ReceivePeers", s, &i); err != nil {
 			log.Printf("[ERROR] Client.ReceivePeers [%d] error: %v", i, err)
 		}
+	}
+}
+
+// getLocalIP returns the non loopback local IP of the host
+func getLocalIP() string {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return ""
+	}
+	for _, address := range addrs {
+		// check the address type and if it is not a loopback the display it
+		if ipnet, ok := address.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
+			if ipnet.IP.To4() != nil {
+				return ipnet.IP.String()
+			}
+		}
+	}
+	return ""
+}
+
+func init() {
+	// This is due to ACLs limitations within the trace package
+	// requiring that authorized requests come from localhost
+	// only.  I'm sure there's some docker magic to properly mask
+	// requests, but this was an easier hack.
+	trace.AuthRequest = func(req *http.Request) (any, sensitive bool) {
+		return true, false
 	}
 }
