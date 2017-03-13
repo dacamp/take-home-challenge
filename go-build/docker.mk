@@ -2,6 +2,14 @@ IMAGE_LOG_FILE = /tmp/challenge.docker
 IMAGE_ID ?= $(shell tail -1 $(IMAGE_LOG_FILE)  | cut -d " " -f 3)
 IMAGES = $(shell docker ps -a -q)
 
+RUNNING_IMAGES = $(shell docker ps -a -q --filter status=running)
+PAUSED_IMAGES = $(shell docker ps -a -q --filter status=paused)
+
+RANGE =  $(words $(RUNNING_IMAGES))
+NUMBER = $(shell number=$$RANDOM; let "number %= $(RANGE)" 2> /dev/null; echo "$$(($$number +1))")
+RANDOM_IMAGE = $(word $(NUMBER), $(RUNNING_IMAGES) )
+
+
 deploy: stop docker-build start
 
 start: validate-docker-build
@@ -17,6 +25,17 @@ remove: stop
 
 docker-build: package
 	docker build . | tee $(IMAGE_LOG_FILE)
+
+pause: show-images
+	@if [[ "$(RUNNING_IMAGES)" ]]; then image=$(RANDOM_IMAGE); echo "Pausing container: $$image" && \
+		docker pause $$image; else echo "No running images"; fi
+
+unpause:
+	@if [[ "$(PAUSED_IMAGES)" ]]; then echo "Unpausing: $(PAUSED_IMAGES)" && \
+		docker unpause $(PAUSED_IMAGES); else echo "No paused images"; fi
+
+show-images:
+	@echo $(IMAGES)
 
 validate-docker-build:
 ifndef IMAGE_ID
